@@ -5,77 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Custom Scratch Packager</title>
     <style>
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            max-width: 800px;
-            margin: 20px auto;
-            padding: 0 20px;
-            background: #f3f4f6;
-            color: #1f2937;
-        }
-        .container {
-            background: white;
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        input, button, textarea {
-            width: 100%;
-            padding: 12px;
-            margin: 8px 0 16px 0;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
-            box-sizing: border-box;
-            font-size: 16px;
-        }
-        button {
-            background: #4f46e5;
-            color: white;
-            font-weight: bold;
-            border: none;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        button:hover {
-            background: #4338ca;
-        }
-        textarea {
-            font-family: monospace;
-            height: 300px;
-            background: #1e1e1e;
-            color: #7be382;
-            resize: vertical;
-        }
-        label {
-            font-weight: 600;
-        }
+        body { font-family: system-ui, -apple-system, sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; background: #f3f4f6; color: #1f2937; }
+        .container { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        input, button, textarea { width: 100%; padding: 12px; margin: 8px 0 16px 0; border: 1px solid #d1d5db; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
+        button { background: #4f46e5; color: white; font-weight: bold; border: none; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #4338ca; }
+        textarea { font-family: monospace; height: 300px; background: #1e1e1e; color: #7be382; resize: vertical; }
+        label { font-weight: 600; }
     </style>
 </head>
 <body>
+    <div class="container">
+        <h2>Scratch to HTML Packager</h2>
+        <p>Enter a public Scratch Project ID below to generate the standalone HTML source code.</p>
+        
+        <label for="projectId">Scratch Project ID:</label>
+        <input type="text" id="projectId" placeholder="e.g., 104; 609170322" value="609170322">
+        
+        <button onclick="generatePackage()">Generate Raw HTML Code</button>
+        
+        <label for="output">Packaged Source Code:</label>
+        <textarea id="output" readonly placeholder="Your generated standalone HTML code will appear here..."></textarea>
+    </div>
 
-<div class="container">
-    <h2>Scratch to HTML Packager</h2>
-    <p>Enter a public Scratch Project ID below to generate the standalone HTML source code.</p>
-    
-    <label for="projectId">Scratch Project ID:</label>
-    <input type="text" id="projectId" placeholder="e.g., 104; 609170322" value="609170322">
-    
-    <button onclick="generatePackage()">Generate Raw HTML Code</button>
-    
-    <label for="output">Packaged Source Code:</label>
-    <textarea id="output" readonly placeholder="Your generated standalone HTML code will appear here..."></textarea>
-</div>
+    <script>
+    function generatePackage() {
+        const id = document.getElementById('projectId').value.trim();
+        if (!id) {
+            alert('Please enter a valid Scratch Project ID');
+            return;
+        }
 
-<script>
-function generatePackage() {
-    const id = document.getElementById('projectId').value.trim();
-    if (!id) {
-        alert('Please enter a valid Scratch Project ID');
-        return;
-    }
-
-    // The single-file HTML container blueprint that embeds the Scratch engine
-    const standaloneTemplate = `<!DOCTYPE html>
+        // The single-file HTML container blueprint that embeds the Scratch engine
+        const standaloneTemplate = `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -97,19 +59,18 @@ function generatePackage() {
         const canvas = document.getElementById('stage');
         const vm = new VirtualMachine();
         const storage = new ScratchStorage();
-        
+
         // Connect assets servers so it can pull the assets dynamically using the ID
         storage.addWebSource(storage.AssetType.Project, id => \`https://projects.scratch.mit.edu/\${id}\`);
         storage.addWebSource(storage.AssetType.ImageVector, asset => \`https://mit.edu\${asset.assetId}.\${asset.dataFormat}/get/\`);
         storage.addWebSource(storage.AssetType.ImageBitmap, asset => \`https://mit.edu\${asset.assetId}.\${asset.dataFormat}/get/\`);
         storage.addWebSource(storage.AssetType.Sound, asset => \`https://mit.edu\${asset.assetId}.\${asset.dataFormat}/get/\`);
-        
         vm.attachStorage(storage);
 
         // Set up the WebGL Renderer
         const renderer = new ScratchRender(canvas);
         vm.attachRenderer(renderer);
-        
+
         // Set up Audio and SVG structural tools
         vm.attachAudioEngine(new AudioEngine());
         vm.attachVBOs(new ScratchSVGRenderer.BitmapAdapter());
@@ -130,6 +91,40 @@ function generatePackage() {
         storage.load(storage.AssetType.Project, "${id}")
             .then(projectAsset => vm.loadProject(projectAsset.data))
             .then(() => {
+                const storageKeyPrefix = 'scratch_cloud_${id}_';
+
+                // 1. Load existing cloud variables from localStorage
+                const stage = vm.runtime.getTargetForStage();
+                if (stage) {
+                    for (const varId in stage.variables) {
+                        const variable = stage.variables[varId];
+                        if (variable.isCloud) {
+                            const savedValue = localStorage.getItem(storageKeyPrefix + variable.name);
+                            if (savedValue !== null) {
+                                variable.value = savedValue;
+                            }
+                        }
+                    }
+                }
+
+                // 2. Attach cloud provider to intercept and save real-time changes
+                vm.setCloudProvider({
+                    updateVariable: (name, value) => {
+                        localStorage.setItem(storageKeyPrefix + name, value);
+                    },
+                    createVariable: (name, value) => {
+                        localStorage.setItem(storageKeyPrefix + name, value);
+                    },
+                    renameVariable: (oldName, newName) => {
+                        const value = localStorage.getItem(storageKeyPrefix + oldName);
+                        localStorage.removeItem(storageKeyPrefix + oldName);
+                        localStorage.setItem(storageKeyPrefix + newName, value);
+                    },
+                    deleteVariable: (name) => {
+                        localStorage.removeItem(storageKeyPrefix + name);
+                    }
+                });
+
                 vm.start();
                 vm.greenFlag(); // Automatically auto-starts the project
             })
@@ -138,9 +133,8 @@ function generatePackage() {
 </body>
 </html>`;
 
-    document.getElementById('output').value = standaloneTemplate;
-}
-</script>
-
+        document.getElementById('output').value = standaloneTemplate;
+    }
+    </script>
 </body>
 </html>
